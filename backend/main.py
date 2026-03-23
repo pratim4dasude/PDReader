@@ -46,29 +46,32 @@ async def health_check():
     )
 
 
-@app.post("/api/documents/upload", response_model=DocumentResponse)
-async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files supported")
+@app.post("/api/documents/upload", response_model=List[DocumentResponse])
+async def upload_documents(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+    results = []
+    for file in files:
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files supported")
+        
+        doc_id = str(uuid.uuid4())
+        filename = f"{doc_id}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            await out_file.write(await file.read())
+        
+        documents_store[doc_id] = {
+            "id": doc_id,
+            "filename": file.filename,
+            "status": DocumentStatus.PENDING,
+            "created_at": datetime.now(),
+            "file_path": file_path
+        }
+        
+        background_tasks.add_task(process_document_task, doc_id, file_path)
+        results.append(DocumentResponse(**documents_store[doc_id]))
     
-    doc_id = str(uuid.uuid4())
-    filename = f"{doc_id}_{file.filename}"
-    file_path = os.path.join(UPLOAD_DIR, filename)
-    
-    async with aiofiles.open(file_path, 'wb') as out_file:
-        await out_file.write(await file.read())
-    
-    documents_store[doc_id] = {
-        "id": doc_id,
-        "filename": file.filename,
-        "status": DocumentStatus.PENDING,
-        "created_at": datetime.now(),
-        "file_path": file_path
-    }
-    
-    background_tasks.add_task(process_document_task, doc_id, file_path)
-    
-    return DocumentResponse(**documents_store[doc_id])
+    return results
 
 
 def process_document_task(doc_id: str, file_path: str):

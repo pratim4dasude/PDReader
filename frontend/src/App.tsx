@@ -35,12 +35,14 @@ function App() {
 
   const [polling, setPolling] = useState(false);
 
-  const uploadFile = async (file: File) => {
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
     setUploading(true);
     setPolling(true);
     try {
-      const doc = await documentApi.upload(file);
-      setDocuments(prev => [doc, ...prev]);
+      const fileArray = Array.from(files);
+      const docs = await documentApi.upload(fileArray);
+      setDocuments(prev => [...docs, ...prev]);
     } catch (err) {
       console.error(err);
     }
@@ -68,8 +70,7 @@ function App() {
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) uploadFile(file);
+    uploadFiles(e.dataTransfer.files);
   };
 
   const sendMessage = async (e: React.FormEvent) => {
@@ -146,12 +147,12 @@ function App() {
               onDragOver={e => e.preventDefault()}
               onDrop={handleDrop}
             >
-              <input type="file" accept=".pdf" className="hidden" id="file-input"
-                onChange={e => e.target.files?.[0] && uploadFile(e.target.files[0])} />
+              <input type="file" accept=".pdf" multiple className="hidden" id="file-input"
+                onChange={e => uploadFiles(e.target.files)} />
               <label htmlFor="file-input" className="cursor-pointer flex flex-col items-center gap-2">
                 {uploading ? <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
                   : <Upload className="w-10 h-10 text-gray-400" />}
-                <span className="text-gray-600">{uploading ? 'Uploading...' : 'Drop PDF or click'}</span>
+                <span className="text-gray-600">{uploading ? 'Uploading...' : 'Drop PDFs or click'}</span>
               </label>
             </div>
 

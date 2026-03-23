@@ -4,10 +4,11 @@ import type { Document, ChatResponse, HealthResponse } from '../types';
 const api = axios.create({ baseURL: '/api' });
 
 export const documentApi = {
-  upload: async (file: File): Promise<Document> => {
+  upload: async (files: File | File[]): Promise<Document[]> => {
     const formData = new FormData();
-    formData.append('file', file);
-    const { data } = await api.post<Document>('/documents/upload', formData, {
+    const fileList = Array.isArray(files) ? files : [files];
+    fileList.forEach(file => formData.append('files', file));
+    const { data } = await api.post<Document[]>('/documents/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return data;
