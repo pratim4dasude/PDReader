@@ -1,0 +1,10 @@
+openai
+langchain>=0.1.0
+langchain-openai
+langchain-community
+faiss-cpu
+pypdf
+python-multipart
+fastapi
+uvicorn[standard]
+aiofiles
