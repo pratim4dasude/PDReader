@@ -72,20 +72,26 @@ def load_vectorstore(doc_id: str) -> FAISS:
     return FAISS.load_local(save_path, embeddings, allow_dangerous_deserialization=True)
 
 def search_documents(doc_ids: List[str], query: str, top_k: int = TOP_K) -> List[Tuple[Document, float]]:
+    print(f"\n🔍 Searching for: '{query}'")
+    print(f"📚 Searching in documents: {doc_ids}")
     all_results = []
     
     for doc_id in doc_ids:
         try:
             vs = load_vectorstore(doc_id)
             results = vs.similarity_search_with_score(query, k=top_k)
+            print(f"   Found {len(results)} results in {doc_id}")
             for doc, score in results:
                 doc.metadata["source_document_id"] = doc_id
                 all_results.append((doc, score))
-        except Exception:
-            pass
+                print(f"   - Score: {score:.4f} | Chunk: {doc.page_content[:80]}...")
+        except Exception as e:
+            print(f"   ❌ Error loading {doc_id}: {e}")
     
     all_results.sort(key=lambda x: x[1], reverse=True)
-    return all_results[:top_k]
+    top_results = all_results[:top_k]
+    print(f"✅ Returning {len(top_results)} best matches\n")
+    return top_results
 
 def delete_vectorstore(doc_id: str):
     save_path = os.path.join(VECTORSTORE_DIR, doc_id)
@@ -99,6 +105,11 @@ def delete_vectorstore(doc_id: str):
 def generate_answer(question: str, context_docs: List[str], chat_history: List[Tuple[str, str]] = None) -> str:
     if not context_docs:
         return "No relevant documents found. Please upload and process documents first."
+    
+    print(f"📝 Question: {question}")
+    print(f"📄 Using {len(context_docs)} context chunks:")
+    for i, ctx in enumerate(context_docs):
+        print(f"   [{i+1}] {ctx[:150]}...")
     
     context = "\n\n---\n\n".join(context_docs)
     
@@ -121,4 +132,5 @@ Answer based only on the context above. If the context doesn't contain the answe
 
     llm = ChatOpenAI(model=OPENAI_MODEL, api_key=OPENAI_API_KEY, temperature=0.7)
     response = llm.invoke(prompt)
+    print(f"🤖 LLM Response: {response.content[:200]}...\n")
     return response.content

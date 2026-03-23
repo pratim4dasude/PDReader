@@ -1,7 +1,9 @@
 import os
 import uuid
 import aiofiles
+import json
 from datetime import datetime
+from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Tuple
@@ -12,7 +14,7 @@ from schemas import (
 )
 from services import (
     process_pdf, create_vectorstore, search_documents, 
-    delete_vectorstore, generate_answer, UPLOAD_DIR, OPENAI_API_KEY
+    delete_vectorstore, generate_answer, UPLOAD_DIR, VECTORSTORE_DIR, OPENAI_API_KEY
 )
 
 # ============ App Setup ============
@@ -27,9 +29,73 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============ In-Memory Storage ============
+# ============ Persistence ============
 
-documents_store: Dict[str, dict] = {}
+DOCS_FILE = "documents.json"
+
+def load_documents_store() -> Dict[str, dict]:
+    if os.path.exists(DOCS_FILE):
+        with open(DOCS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_documents_store():
+    with open(DOCS_FILE, "w") as f:
+        json.dump(documents_store, f, default=str)
+
+def initialize_store():
+    global documents_store
+    documents_store = load_documents_store()
+    
+    if documents_store:
+        valid_docs = {}
+        for doc_id, doc in documents_store.items():
+            file_path = doc.get("file_path", "")
+            vector_path = os.path.join("vectorstores", doc_id)
+            if os.path.exists(file_path) and os.path.exists(vector_path):
+                valid_docs[doc_id] = doc
+            else:
+                print(f"⚠️ Removing missing document: {doc_id}")
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except:
+                    pass
+                try:
+                    delete_vectorstore(doc_id)
+                except:
+                    pass
+        documents_store = valid_docs
+        save_documents_store()
+        
+        print(f"📂 Loaded {len(documents_store)} existing documents")
+    else:
+        clean_orphan_files()
+        print("📂 No existing documents found")
+
+def clean_orphan_files():
+    for f in os.listdir(UPLOAD_DIR):
+        file_path = os.path.join(UPLOAD_DIR, f)
+        if os.path.isfile(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
+    for d in os.listdir(VECTORSTORE_DIR):
+        dir_path = os.path.join(VECTORSTORE_DIR, d)
+        if os.path.isdir(dir_path):
+            try:
+                for f in os.listdir(dir_path):
+                    os.remove(os.path.join(dir_path, f))
+                os.rmdir(dir_path)
+            except:
+                pass
+    print("🧹 Cleaned up orphan files")
+
+initialize_store()
+
+# ============ Chat History ============
+
 chat_histories: Dict[str, List[Tuple[str, str]]] = {}
 
 # ============ Routes ============
@@ -71,12 +137,14 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
         background_tasks.add_task(process_document_task, doc_id, file_path)
         results.append(DocumentResponse(**documents_store[doc_id]))
     
+    save_documents_store()
     return results
 
 
 def process_document_task(doc_id: str, file_path: str):
     try:
         documents_store[doc_id]["status"] = DocumentStatus.PROCESSING
+        save_documents_store()
         
         chunks, page_count = process_pdf(file_path)
         create_vectorstore(chunks, doc_id)
@@ -86,11 +154,13 @@ def process_document_task(doc_id: str, file_path: str):
             "page_count": page_count,
             "chunk_count": len(chunks)
         })
+        save_documents_store()
     except Exception as e:
         documents_store[doc_id].update({
             "status": DocumentStatus.ERROR,
             "error_message": str(e)
         })
+        save_documents_store()
 
 
 @app.get("/api/documents")
@@ -121,8 +191,30 @@ async def delete_document(doc_id: str):
     
     delete_vectorstore(doc_id)
     del documents_store[doc_id]
+    save_documents_store()
     
     return {"message": "Document deleted"}
+
+
+@app.delete("/api/documents")
+async def delete_all_documents():
+    global documents_store
+    
+    for doc_id, doc in list(documents_store.items()):
+        if os.path.exists(doc.get("file_path", "")):
+            try:
+                os.remove(doc["file_path"])
+            except:
+                pass
+        try:
+            delete_vectorstore(doc_id)
+        except:
+            pass
+    
+    documents_store = {}
+    save_documents_store()
+    
+    return {"message": "All documents deleted"}
 
 
 @app.post("/api/chat", response_model=ChatResponse)

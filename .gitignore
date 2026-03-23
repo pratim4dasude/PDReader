@@ -11,6 +11,7 @@ venv/
 # Runtime data
 backend/uploads/
 backend/vectorstores/
+documents.json
 
 # Build outputs
 dist/

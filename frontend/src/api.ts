@@ -20,6 +20,8 @@ export const documentApi = {
   },
 
   delete: async (id: string) => api.delete(`/documents/${id}`),
+  
+  deleteAll: async () => api.delete('/documents'),
 };
 
 export const chatApi = {

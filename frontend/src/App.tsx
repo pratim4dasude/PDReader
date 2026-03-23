@@ -68,6 +68,13 @@ function App() {
     setDocuments(prev => prev.filter(d => d.id !== id));
   };
 
+  const deleteAllDocs = async () => {
+    if (!confirm('Delete all documents? This cannot be undone.')) return;
+    await documentApi.deleteAll();
+    setDocuments([]);
+    setMessages([]);
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     uploadFiles(e.dataTransfer.files);
@@ -175,6 +182,12 @@ function App() {
                 </div>
               ))}
             </div>
+
+            {documents.length > 0 && (
+              <button onClick={deleteAllDocs} className="w-full mt-4 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50">
+                Delete All
+              </button>
+            )}
           </div>
         </aside>
 
