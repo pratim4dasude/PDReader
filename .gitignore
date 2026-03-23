@@ -8,6 +8,10 @@ venv/
 .env.local
 .env.*.local
 
+# Runtime data
+backend/uploads/
+backend/vectorstores/
+
 # Build outputs
 dist/
 build/
