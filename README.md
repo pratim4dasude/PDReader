@@ -40,6 +40,59 @@
 | [Vite](https://vitejs.dev/) | Build tool |
 | [Lucide React](https://lucide.dev/) | Icons |
 
+
+
+## 🏗️ System Design
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Frontend (React + Vite)                        │
+│                                                                             │
+│   Document Upload ─────► Chat Interface ─────► Source Citations             │
+│   (Drag & Drop)          (Real-time Chat)     (Page + Chunk refs)           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │ HTTP
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Backend (FastAPI)                              │
+│                                                                             │
+│   ┌─────────────┐        ┌─────────────┐     ┌────────────────────────┐     │
+│   │  Documents  │        │    Chat     │     │       Health           │     │
+│   │   Router    │        │   Router    │     │       Router           │     │
+│   │  (CRUD ops) │        │  (Q&A)      │     │    (Status check)      │     │
+│   └──────┬──────┘        └──────┬──────┘     └────────────┬───────────┘     │
+│          │                      │                         │                 |
+│          └──────────────────────┼─────────────────────────┘                 | 
+│                                 │                                           │
+│   ┌─────────────────────────────┼─────────────────────────────────────────┐ │
+│   │                     Services Layer                                    │ │
+│   │                                                                       │ │
+│   │   ┌──────────────┐  ┌──────────────┐  ┌─────────────────────────┐     │ │
+│   │   │   PDF        │  │   Vector     │  │        LLM              │     │ │
+│   │   │  Processing  │  │   Search     │  │      Service            │     │ │
+│   │   │  (PyPDF +    │  │  (FAISS +    │  │  (GPT-3.5-turbo)        │     │ │
+│   │   │  LangChain)  │  │  OpenAI      │  │                         │     │ │
+│   │   │              │  │  Embeddings) │  │                         │     │ │
+│   │   └──────────────┘  └──────────────┘  └─────────────────────────┘     │ │
+│   └───────────────────────────────────────────────────────────────────────┘ │
+│                               │                                             │
+└───────────────────────────────┼─────────────────────────────────────────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          │                     │                     │
+          ▼                     ▼                     ▼
+   ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
+   │   Local     │       │   FAISS     │       │   OpenAI    │
+   │   File      │       │   Vector    │       │    API      │
+   │   System    │       │   Store     │       │             │
+   │  (PDFs +    │       │  (Local)    │       │             │
+   │   JSON)     │       │             │       │             │
+   └─────────────┘       └─────────────┘       └─────────────┘
+``` 
+
+
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -181,13 +234,7 @@ Customize behavior by editing `backend/services.py`:
 | `TOP_K` | 4 | Number of documents to retrieve |
 | `OPENAI_MODEL` | gpt-3.5-turbo | LLM model to use |
 
-## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
@@ -195,6 +242,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [FAISS](https://github.com/facebookresearch/faiss) for efficient similarity search
 - [OpenAI](https://openai.com/) for the LLM capabilities
 
----
 
-<p align="center">Made with ❤️ for easier document reading</p>
