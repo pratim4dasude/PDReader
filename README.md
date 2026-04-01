@@ -1,13 +1,20 @@
-# 📄 PDReader - AI-Powered PDF Q&A
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Stack-FastAPI%20%2B%20React-blue?style=for-the-badge" alt="Stack" />
+<h1 align="center">📄 PDReader - AI-Powered PDF Q&A</h1>
+<div align="center">
+  <!-- <img src="https://img.shields.io/badge/Stack-FastAPI%20%2B%20React-blue?style=for-the-badge" alt="Stack" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License" />
   <img src="https://img.shields.io/badge/Python-3.11+-yellow?style=for-the-badge" alt="Python" />
-  <img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge" alt="Status" />
-</p>
+  <img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge" alt="Status" /> -->
 
-> Upload any PDF and chat with it using AI. PDReader uses Retrieval-Augmented Generation (RAG) to understand your documents and answer questions accurately.
+  ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
+  ![LangChain](https://img.shields.io/badge/LangChain-000000?style=flat&logo=chainlink&logoColor=white)
+  ![FAISS](https://img.shields.io/badge/FAISS-Vector%20DB-0467DF?style=flat)
+  ![OpenAI](https://img.shields.io/badge/OpenAI-GPT-412991?style=flat&logo=openai&logoColor=white)
+  ![React](https://img.shields.io/badge/React-20232A?style=flat&logo=react&logoColor=61DAFB)
+
+</div>
+
+ Upload any PDF and chat with it using AI. PDReader uses Retrieval-Augmented Generation (RAG) to understand your documents and answer questions accurately.
 
 ## ✨ Features
 
