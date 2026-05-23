@@ -57,6 +57,19 @@ OVERVIEW_TERMS = (
     "what does the book say",
 )
 STUDY_TERMS = (
+    "what we learn",
+    "what can we learn",
+    "what i learn",
+    "what should i learn",
+    "what should we learn",
+    "what it teaches",
+    "what it teach",
+    "what they teach",
+    "what this teaches",
+    "what this teach",
+    "teaches us",
+    "teach us",
+    "teacjes",
     "how should i read",
     "how should we read",
     "how to read",
@@ -67,6 +80,11 @@ STUDY_TERMS = (
     "skills need",
     "skill need",
     "skills required",
+    "skill required",
+    "required skill",
+    "required skills",
+    "what skill",
+    "what skills",
     "prerequisite",
     "prerequisites",
     "background needed",
@@ -87,6 +105,8 @@ CODE_TERMS = (
 DOCUMENT_TERMS = (
     "doc",
     "docs",
+    "dook",
+    "dooks",
     "document",
     "documents",
     "pdf",
@@ -134,7 +154,7 @@ TECHNICAL_BOOK_TERMS = (
 
 def classify_intent(query: str) -> Intent:
     normalized = query.lower().strip()
-    if normalized in GREETING_TERMS:
+    if is_greeting(normalized):
         return "greeting"
     if any(contains_term(normalized, term) for term in HELP_TERMS):
         return "general"
@@ -147,6 +167,12 @@ def classify_intent(query: str) -> Intent:
     if looks_document_related(normalized):
         return "search"
     return "general"
+
+
+def is_greeting(normalized_query: str) -> bool:
+    if normalized_query in GREETING_TERMS:
+        return True
+    return any(normalized_query.startswith(f"{term} ") for term in GREETING_TERMS)
 
 
 def looks_document_related(normalized_query: str) -> bool:
@@ -170,28 +196,43 @@ def route_intent(state: AgentState) -> AgentState:
 
 
 def greeting_node(state: AgentState) -> AgentState:
-    return {
-        **state,
-        "answer": (
+    normalized = state["query"].lower().strip()
+    if "how are you" in normalized:
+        answer = (
+            "I am good. I can chat normally, and when you ask about the uploaded PDFs "
+            "I will use the books as context."
+        )
+    else:
+        answer = (
             "Hi. I can chat normally, or I can answer from your uploaded PDFs when "
             "your question is about the books."
-        ),
+        )
+
+    return {
+        **state,
+        "answer": answer,
         "sources": [],
         "used_tools": state.get("used_tools", []) + ["greeting"],
     }
 
 
 def general_node(state: AgentState) -> AgentState:
+    normalized = state["query"].lower().strip()
+    if "how are you" in normalized:
+        answer = (
+            "I am good. I can chat normally, and when you ask about the uploaded PDFs "
+            "I will use the books as context."
+        )
+    else:
+        answer = (
+            "I can help with normal questions too. If you want a document-grounded "
+            "answer, mention the books, PDFs, docs, chapters, topics, skills, reading "
+            "plan, or code practice."
+        )
+
     return {
         **state,
-        "answer": (
-            "I can help with normal questions too. For document-grounded answers, ask "
-            "things like:\n\n"
-            "- Give me a detailed overview of each uploaded book.\n"
-            "- What are the important topics across these PDFs?\n"
-            "- Explain RAG from the uploaded documents.\n"
-            "- Give me an original code example for a concept discussed in the books."
-        ),
+        "answer": answer,
         "sources": [],
         "used_tools": state.get("used_tools", []) + ["general_chat"],
     }
