@@ -6,6 +6,8 @@ The project began as a minimal PDF RAG demo and was hardened into a more product
 
 ---
 
+![Alternative Text](image.png)
+
 ## Table of Contents
 
 - [Capabilities](#capabilities)
