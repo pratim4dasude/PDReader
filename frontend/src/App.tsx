@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileText, MessageSquare, Upload, X, Send, Bot, User, Loader2, BookOpen } from 'lucide-react';
 import { documentApi, chatApi, healthApi } from './api';
-import type { Document, Message } from './types';
+import type { Document, Message, HealthResponse } from './types';
 
 function App() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -174,6 +174,11 @@ function App() {
                       <p className="text-xs text-gray-500">
                         {doc.status === 'ready' ? `${doc.page_count} pages` : doc.status}
                       </p>
+                      {doc.status === 'error' && doc.error_message ? (
+                        <p className="text-xs text-red-600 max-w-[180px] truncate" title={doc.error_message}>
+                          {doc.error_message}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <button onClick={() => deleteDoc(doc.id)} className="p-1 hover:bg-gray-200 rounded">

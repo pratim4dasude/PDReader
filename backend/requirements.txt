@@ -5,6 +5,7 @@ langchain-community
 faiss-cpu
 pypdf
 python-multipart
+python-dotenv
 fastapi
 uvicorn[standard]
 aiofiles

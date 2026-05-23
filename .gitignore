@@ -12,6 +12,7 @@ venv/
 backend/uploads/
 backend/vectorstores/
 documents.json
+backend/documents.json
 
 # Build outputs
 dist/
