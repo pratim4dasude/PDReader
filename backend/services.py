@@ -313,14 +313,21 @@ Use the excerpts to answer the user's question directly. For broad questions lik
 answer is based on the available overviews and retrieved excerpts. Write useful, specific answers with enough detail
 to help the user understand the documents.
 
+The user may also ask practical meta-questions such as how to read the books, what skills are needed, what to focus
+on first, or what code projects to practice. For those questions, use the document topics as the grounding and give
+reasonable senior-engineer recommendations. Make clear when something is a recommendation instead of a direct quote
+from the excerpts.
+
 Rules:
 - Never return an empty answer.
 - Do not apologize.
 - For overview requests, separate the answer by document using clear headings.
 - Prefer concise but substantial explanations over one-line answers.
+- For reading plans, skill lists, and practice ideas, provide useful guidance even if the exact question is not stated
+  verbatim in the excerpts.
 - Do not include a "Sources" section; the app renders sources separately.
 - If the excerpts are genuinely unrelated to the question, say that the available context does not contain enough
-  information and suggest a more specific question.
+  information for that exact fact, then provide the best next question or study direction.
 
 Retrieved excerpts:
 {context}
@@ -330,7 +337,8 @@ Chat History:
 
 Question: {question}
 
-Answer based only on the context above. If the context doesn't contain the answer, say so."""
+Answer using the context above. Do not invent specific facts about a book, but you may infer study guidance from the
+topics and summaries."""
 
     llm = ChatOpenAI(model=OPENAI_MODEL, api_key=OPENAI_API_KEY, temperature=0.7)
     response = llm.invoke(prompt)

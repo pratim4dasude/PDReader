@@ -9,7 +9,7 @@ from retrieval import hybrid_search
 from schemas import SourceDocument
 from services import generate_answer, generate_document_summary_and_topics, get_document_overview
 
-Intent = Literal["greeting", "general", "overview", "code", "search"]
+Intent = Literal["greeting", "general", "overview", "study", "code", "search"]
 
 
 class AgentState(TypedDict, total=False):
@@ -38,6 +38,11 @@ OVERVIEW_TERMS = (
     "what's in",
     "what is this doc",
     "what is this document",
+    "what this doc",
+    "what this docs",
+    "what these docs",
+    "what are these docs",
+    "all about",
     "what are the main topics",
     "important topic",
     "important topics",
@@ -47,11 +52,31 @@ OVERVIEW_TERMS = (
     "summary",
     "overview",
     "context of",
+    "contxet",
     "what the book say",
     "what does the book say",
 )
+STUDY_TERMS = (
+    "how should i read",
+    "how should we read",
+    "how to read",
+    "read this",
+    "read these",
+    "reading plan",
+    "study plan",
+    "skills need",
+    "skill need",
+    "skills required",
+    "prerequisite",
+    "prerequisites",
+    "background needed",
+    "learn first",
+    "before reading",
+    "roadmap",
+)
 CODE_TERMS = (
     "code",
+    "codes",
     "sample",
     "example",
     "implementation",
@@ -117,6 +142,8 @@ def classify_intent(query: str) -> Intent:
         return "code"
     if any(contains_term(normalized, term) for term in OVERVIEW_TERMS):
         return "overview"
+    if any(contains_term(normalized, term) for term in STUDY_TERMS):
+        return "study"
     if looks_document_related(normalized):
         return "search"
     return "general"
@@ -259,10 +286,12 @@ def code_node(state: AgentState) -> AgentState:
     )
     next_state = {**state, "query": code_query}
     retrieved = retrieval_node(next_state)
+    with_overviews = overview_node(retrieved)
     return {
-        **retrieved,
+        **with_overviews,
         "query": state["query"],
-        "used_tools": state.get("used_tools", []) + ["code_example_search", "hybrid_search"],
+        "used_tools": state.get("used_tools", [])
+        + ["code_example_search", "hybrid_search", "document_overview"],
     }
 
 
@@ -284,10 +313,18 @@ def synthesize_node(state: AgentState) -> AgentState:
             "who it is useful for, and what a reader should learn. Use only the "
             "document summaries and topic maps provided."
         )
+    if state.get("intent") == "study":
+        query = (
+            f"{query}\n\nGive practical study guidance based on the document summaries "
+            "and topic maps. Include a short reading order, prerequisite skills, and "
+            "what to focus on first. It is okay to infer reasonable study advice from "
+            "the topics, but do not invent specific book facts."
+        )
     if state.get("intent") == "code":
         query = (
             f"{query}\n\nExplain the relevant book concept first, then provide an "
-            "original runnable code example. Do not reproduce long copyrighted code."
+            "original runnable code example or a list of useful practice projects "
+            "based on the book topics. Do not reproduce long copyrighted code."
         )
 
     answer = generate_answer(query, state["context"], state.get("history", []))
@@ -348,6 +385,8 @@ def route_after_intent(state: AgentState) -> str:
     if intent == "general":
         return "general"
     if intent == "overview":
+        return "overview"
+    if intent == "study":
         return "overview"
     if intent == "code":
         return "code"
