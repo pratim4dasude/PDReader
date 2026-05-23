@@ -238,13 +238,13 @@ Retrieval is hybrid by design because technical books rely heavily on exact term
        +---------------+----------------+
        |                                |
        v                                v
-+---------------+               +----------------+
-| semantic_search|              | keyword_search |
-| OpenAI embed  |               | plainto_tsquery|
-| pgvector      |               | ts_rank        |
-| cosine_distance|              |                |
-| limit=8       |               | limit=8        |
-+-------+-------+               +--------+-------+
++----------------+               +----------------+
+| semantic_search|               | keyword_search |
+| OpenAI embed   |               | plainto_tsquery|
+| pgvector       |               | ts_rank        |
+| cosine_distance|               |                |
+| limit=8        |               | limit=8        |
++-------+--------+               +--------+-------+
         |                                |
         +-------------+------------------+
                       v
