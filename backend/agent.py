@@ -1,3 +1,4 @@
+import re
 from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -8,7 +9,7 @@ from retrieval import hybrid_search
 from schemas import SourceDocument
 from services import generate_answer, generate_document_summary_and_topics, get_document_overview
 
-Intent = Literal["greeting", "overview", "code", "search"]
+Intent = Literal["greeting", "general", "overview", "code", "search"]
 
 
 class AgentState(TypedDict, total=False):
@@ -24,7 +25,14 @@ class AgentState(TypedDict, total=False):
     answer: str
 
 
-GREETING_TERMS = {"hi", "hello", "hey", "yo", "hii", "help"}
+GREETING_TERMS = {"hi", "hello", "hey", "yo", "hii"}
+HELP_TERMS = {
+    "help",
+    "what can you do",
+    "how can you help",
+    "what should i ask",
+    "what questions can i ask",
+}
 OVERVIEW_TERMS = (
     "what is in",
     "what's in",
@@ -51,17 +59,77 @@ CODE_TERMS = (
     "python",
     "javascript",
 )
+DOCUMENT_TERMS = (
+    "doc",
+    "docs",
+    "document",
+    "documents",
+    "pdf",
+    "pdfs",
+    "book",
+    "books",
+    "chapter",
+    "page",
+    "pages",
+    "source",
+    "sources",
+    "uploaded",
+    "according to",
+    "from this",
+    "from these",
+    "from the",
+    "in this",
+    "in these",
+)
+TECHNICAL_BOOK_TERMS = (
+    "rag",
+    "retrieval",
+    "embedding",
+    "embeddings",
+    "vector",
+    "chunk",
+    "chunks",
+    "llm",
+    "ai",
+    "ml",
+    "machine learning",
+    "foundation model",
+    "fine-tuning",
+    "prompt",
+    "context",
+    "agent",
+    "evaluation",
+    "deployment",
+    "mlops",
+    "llmops",
+    "inference",
+    "training",
+)
 
 
 def classify_intent(query: str) -> Intent:
     normalized = query.lower().strip()
     if normalized in GREETING_TERMS:
         return "greeting"
-    if any(term in normalized for term in CODE_TERMS):
+    if any(contains_term(normalized, term) for term in HELP_TERMS):
+        return "general"
+    if any(contains_term(normalized, term) for term in CODE_TERMS) and looks_document_related(normalized):
         return "code"
-    if any(term in normalized for term in OVERVIEW_TERMS):
+    if any(contains_term(normalized, term) for term in OVERVIEW_TERMS):
         return "overview"
-    return "search"
+    if looks_document_related(normalized):
+        return "search"
+    return "general"
+
+
+def looks_document_related(normalized_query: str) -> bool:
+    return any(contains_term(normalized_query, term) for term in DOCUMENT_TERMS + TECHNICAL_BOOK_TERMS)
+
+
+def contains_term(normalized_query: str, term: str) -> bool:
+    if " " in term or "-" in term:
+        return term in normalized_query
+    return re.search(rf"\b{re.escape(term)}\b", normalized_query) is not None
 
 
 def route_intent(state: AgentState) -> AgentState:
@@ -78,11 +146,27 @@ def greeting_node(state: AgentState) -> AgentState:
     return {
         **state,
         "answer": (
-            "Hi. Ask me for a book overview, important topics, a study plan, "
-            "specific Q&A, or code examples from the uploaded documents."
+            "Hi. I can chat normally, or I can answer from your uploaded PDFs when "
+            "your question is about the books."
         ),
         "sources": [],
         "used_tools": state.get("used_tools", []) + ["greeting"],
+    }
+
+
+def general_node(state: AgentState) -> AgentState:
+    return {
+        **state,
+        "answer": (
+            "I can help with normal questions too. For document-grounded answers, ask "
+            "things like:\n\n"
+            "- Give me a detailed overview of each uploaded book.\n"
+            "- What are the important topics across these PDFs?\n"
+            "- Explain RAG from the uploaded documents.\n"
+            "- Give me an original code example for a concept discussed in the books."
+        ),
+        "sources": [],
+        "used_tools": state.get("used_tools", []) + ["general_chat"],
     }
 
 
@@ -244,7 +328,7 @@ def truncate(value: str, limit: int) -> str:
 
 
 def citation_guard_node(state: AgentState) -> AgentState:
-    if state.get("intent") == "greeting":
+    if state.get("intent") in {"greeting", "general"}:
         return state
     if state.get("sources"):
         return state
@@ -261,6 +345,8 @@ def route_after_intent(state: AgentState) -> str:
     intent = state["intent"]
     if intent == "greeting":
         return "greeting"
+    if intent == "general":
+        return "general"
     if intent == "overview":
         return "overview"
     if intent == "code":
@@ -272,6 +358,7 @@ def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("route", route_intent)
     graph.add_node("greeting", greeting_node)
+    graph.add_node("general", general_node)
     graph.add_node("overview", overview_node)
     graph.add_node("retrieve", retrieval_node)
     graph.add_node("code", code_node)
@@ -284,12 +371,14 @@ def build_graph():
         route_after_intent,
         {
             "greeting": "greeting",
+            "general": "general",
             "overview": "overview",
             "code": "code",
             "retrieve": "retrieve",
         },
     )
     graph.add_edge("greeting", "citation_guard")
+    graph.add_edge("general", "citation_guard")
     graph.add_edge("overview", "synthesize")
     graph.add_edge("retrieve", "synthesize")
     graph.add_edge("code", "synthesize")

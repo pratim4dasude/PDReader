@@ -3,6 +3,80 @@ import { FileText, MessageSquare, Upload, X, Send, Bot, User, Loader2, BookOpen 
 import { documentApi, chatApi, healthApi, jobApi } from './api';
 import type { Document, Message, HealthResponse, Job } from './types';
 
+type MarkdownTextProps = {
+  content: string;
+  inverted?: boolean;
+};
+
+const renderInlineMarkdown = (text: string) => {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index} className="font-semibold">{part.slice(2, -2)}</strong>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+};
+
+function MarkdownText({ content, inverted = false }: MarkdownTextProps) {
+  const lines = content.split('\n');
+  const textColor = inverted ? 'text-white' : 'text-gray-800';
+  const mutedColor = inverted ? 'text-blue-50' : 'text-gray-600';
+
+  return (
+    <div className={`space-y-2 text-sm leading-relaxed ${textColor}`}>
+      {lines.map((line, index) => {
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+          return <div key={index} className="h-1" />;
+        }
+
+        if (trimmed === '---') {
+          return <hr key={index} className={inverted ? 'border-blue-300' : 'border-gray-300'} />;
+        }
+
+        if (trimmed.startsWith('### ')) {
+          return (
+            <h3 key={index} className="pt-2 text-base font-semibold">
+              {renderInlineMarkdown(trimmed.slice(4))}
+            </h3>
+          );
+        }
+
+        if (trimmed.startsWith('## ')) {
+          return (
+            <h2 key={index} className="pt-2 text-lg font-semibold">
+              {renderInlineMarkdown(trimmed.slice(3))}
+            </h2>
+          );
+        }
+
+        if (trimmed.startsWith('- ')) {
+          return (
+            <div key={index} className="flex gap-2">
+              <span className={mutedColor}>•</span>
+              <span>{renderInlineMarkdown(trimmed.slice(2))}</span>
+            </div>
+          );
+        }
+
+        const numberedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+        if (numberedMatch) {
+          return (
+            <div key={index} className="flex gap-2">
+              <span className={mutedColor}>{numberedMatch[1]}.</span>
+              <span>{renderInlineMarkdown(numberedMatch[2])}</span>
+            </div>
+          );
+        }
+
+        return <p key={index}>{renderInlineMarkdown(trimmed)}</p>;
+      })}
+    </div>
+  );
+}
+
 function App() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -254,7 +328,7 @@ function App() {
                 </div>
                 <div className={`max-w-[70%] rounded-lg p-3
                   ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  <MarkdownText content={msg.content} inverted={msg.role === 'user'} />
                   {msg.sources?.length ? (
                     <details className="mt-2 pt-2 border-t border-gray-300">
                       <summary className="text-xs flex items-center gap-1 mb-1 cursor-pointer">
