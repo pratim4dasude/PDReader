@@ -1,5 +1,6 @@
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -11,6 +12,7 @@ BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend"
 PYTHON = BACKEND / "venv" / "Scripts" / "python.exe"
 ALEMBIC = BACKEND / "venv" / "Scripts" / "alembic.exe"
+NPM = shutil.which("npm.cmd") or shutil.which("npm")
 
 processes: list[tuple[str, subprocess.Popen]] = []
 
@@ -64,6 +66,8 @@ def main() -> int:
     require_path(PYTHON, "Backend virtual environment was not found")
     require_path(ALEMBIC, "Alembic executable was not found")
     require_path(FRONTEND / "package.json", "Frontend package.json was not found")
+    if not NPM:
+        raise RuntimeError("npm was not found. Install Node.js or make sure npm is available in PATH.")
 
     try:
         step("Starting Postgres and Redis")
@@ -91,7 +95,7 @@ def main() -> int:
         start_process("RQ worker", [str(PYTHON), "worker.py"], BACKEND)
         start_process(
             "frontend",
-            ["npm", "run", "dev", "--", "--host", "127.0.0.1"],
+            [NPM, "run", "dev", "--", "--host", "127.0.0.1"],
             FRONTEND,
         )
 
