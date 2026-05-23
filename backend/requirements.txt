@@ -2,10 +2,15 @@ openai
 langchain>=0.1.0
 langchain-openai
 langchain-community
-faiss-cpu
 pypdf
 python-multipart
 python-dotenv
 fastapi
 uvicorn[standard]
 aiofiles
+sqlalchemy
+alembic
+psycopg[binary]
+pgvector
+redis
+rq
