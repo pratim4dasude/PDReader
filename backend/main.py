@@ -1,31 +1,30 @@
-import json
 import logging
 import os
 import uuid
-from datetime import datetime
 from typing import Dict, List, Tuple
 
 import aiofiles
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
+from db import get_db
+from models import DocumentRecord, JobRecord
+from repositories import create_document, create_job, update_job
+from agent import run_study_agent
 from schemas import (
     ChatRequest,
     ChatResponse,
     DocumentResponse,
     DocumentStatus,
     HealthResponse,
+    JobResponse,
     SourceDocument,
 )
-from services import (
-    UPLOAD_DIR,
-    VECTORSTORE_DIR,
-    create_vectorstore,
-    delete_vectorstore,
-    generate_answer,
-    process_pdf,
-    search_documents,
-)
+from services import OPENAI_MODEL, UPLOAD_DIR, delete_vectorstore
+from task_queue import document_queue
+from tasks import process_document_job
 
 # ============ Logging ============
 
@@ -43,7 +42,7 @@ logger = logging.getLogger("pdreader.api")
 
 # ============ App Setup ============
 
-app = FastAPI(title="PDReader API", version="1.0.0")
+app = FastAPI(title="PDReader API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,82 +52,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============ Persistence ============
-
-DOCS_FILE = "documents.json"
-
-
-def load_documents_store() -> Dict[str, dict]:
-    if os.path.exists(DOCS_FILE):
-        with open(DOCS_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-
-def save_documents_store():
-    with open(DOCS_FILE, "w") as f:
-        json.dump(documents_store, f, default=str)
-
-
-def initialize_store():
-    global documents_store
-    documents_store = load_documents_store()
-
-    if documents_store:
-        valid_docs = {}
-        for doc_id, doc in documents_store.items():
-            file_path = doc.get("file_path", "")
-            vector_path = os.path.join(VECTORSTORE_DIR, doc_id)
-            if os.path.exists(file_path) and os.path.exists(vector_path):
-                valid_docs[doc_id] = doc
-            else:
-                logger.warning("Removing missing document from store: doc_id=%s", doc_id)
-                try:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                except Exception:
-                    logger.exception("Failed to remove missing upload file: path=%s", file_path)
-
-                try:
-                    delete_vectorstore(doc_id)
-                except Exception:
-                    logger.exception("Failed to remove missing vectorstore: doc_id=%s", doc_id)
-
-        documents_store = valid_docs
-        save_documents_store()
-        logger.info("Loaded existing documents: count=%s", len(documents_store))
-    else:
-        clean_orphan_files()
-        logger.info("No existing documents found")
-
-
-def clean_orphan_files():
-    for filename in os.listdir(UPLOAD_DIR):
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        if os.path.isfile(file_path):
-            try:
-                os.remove(file_path)
-            except Exception:
-                logger.exception("Failed to remove orphan upload file: path=%s", file_path)
-
-    for dirname in os.listdir(VECTORSTORE_DIR):
-        dir_path = os.path.join(VECTORSTORE_DIR, dirname)
-        if os.path.isdir(dir_path):
-            try:
-                for filename in os.listdir(dir_path):
-                    os.remove(os.path.join(dir_path, filename))
-                os.rmdir(dir_path)
-            except Exception:
-                logger.exception("Failed to remove orphan vectorstore directory: path=%s", dir_path)
-
-    logger.info("Cleaned up orphan files")
-
-
-initialize_store()
-
 # ============ Chat History ============
 
 chat_histories: Dict[str, List[Tuple[str, str]]] = {}
+
+
+def document_to_response(
+    document: DocumentRecord,
+    current_job_id: str | None = None,
+) -> DocumentResponse:
+    return DocumentResponse(
+        id=document.id,
+        filename=document.filename,
+        status=document.status,
+        created_at=document.created_at,
+        page_count=document.page_count,
+        chunk_count=document.chunk_count,
+        error_message=document.error_message,
+        current_job_id=current_job_id,
+    )
+
+
+def job_to_response(job: JobRecord) -> JobResponse:
+    return JobResponse(
+        id=job.id,
+        document_id=job.document_id,
+        job_type=job.job_type,
+        status=job.status,
+        progress=job.progress,
+        error_message=job.error_message,
+        rq_job_id=job.rq_job_id,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
 
 # ============ Routes ============
 
@@ -140,7 +97,7 @@ async def health_check():
     api_key = os.getenv("OPENAI_API_KEY", "")
     return HealthResponse(
         status="healthy",
-        version="1.0.0",
+        version="2.0.0",
         openai_configured=bool(api_key and api_key != "your_openai_api_key_here"),
     )
 
@@ -149,7 +106,10 @@ async def health_check():
 async def upload_documents(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
 ):
+    del background_tasks
+
     results = []
     for file in files:
         if not file.filename.lower().endswith(".pdf"):
@@ -157,208 +117,180 @@ async def upload_documents(
             raise HTTPException(status_code=400, detail="Only PDF files supported")
 
         doc_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
         filename = f"{doc_id}_{file.filename}"
         file_path = os.path.join(UPLOAD_DIR, filename)
-        logger.info("Upload received: filename=%s doc_id=%s", file.filename, doc_id)
+        logger.info("Upload received: filename=%s doc_id=%s job_id=%s", file.filename, doc_id, job_id)
 
         async with aiofiles.open(file_path, "wb") as out_file:
             file_bytes = await file.read()
             await out_file.write(file_bytes)
 
-        logger.info(
-            "Upload saved: filename=%s doc_id=%s size_mb=%.2f path=%s",
-            file.filename,
-            doc_id,
-            len(file_bytes) / (1024 * 1024),
-            file_path,
+        document = create_document(
+            db,
+            doc_id=doc_id,
+            filename=file.filename,
+            file_path=file_path,
+            status=DocumentStatus.PENDING.value,
+        )
+        create_job(
+            db,
+            job_id=job_id,
+            document_id=doc_id,
+            job_type="process_document",
+            status="queued",
+            progress=0,
         )
 
-        documents_store[doc_id] = {
-            "id": doc_id,
-            "filename": file.filename,
-            "status": DocumentStatus.PENDING,
-            "created_at": datetime.now(),
-            "file_path": file_path,
-        }
+        rq_job = document_queue.enqueue(
+            process_document_job,
+            job_id,
+            doc_id,
+            file_path,
+            file.filename,
+            job_timeout="2h",
+        )
+        update_job(db, job_id=job_id, rq_job_id=rq_job.id)
 
-        background_tasks.add_task(process_document_task, doc_id, file_path)
-        results.append(DocumentResponse(**documents_store[doc_id]))
+        logger.info(
+            "Upload saved and queued: filename=%s doc_id=%s job_id=%s size_mb=%.2f",
+            file.filename,
+            doc_id,
+            job_id,
+            len(file_bytes) / (1024 * 1024),
+        )
+        results.append(document_to_response(document, current_job_id=job_id))
 
-    save_documents_store()
     return results
 
 
-def process_document_task(doc_id: str, file_path: str):
-    filename = documents_store.get(doc_id, {}).get("filename", doc_id)
-    try:
-        logger.info("Processing started: filename=%s doc_id=%s", filename, doc_id)
-
-        documents_store[doc_id]["status"] = DocumentStatus.PROCESSING
-        save_documents_store()
-
-        chunks, page_count = process_pdf(file_path)
-        logger.info(
-            "PDF processed: filename=%s doc_id=%s pages=%s chunks=%s",
-            filename,
-            doc_id,
-            page_count,
-            len(chunks),
-        )
-
-        create_vectorstore(chunks, doc_id)
-        logger.info("Vectorstore created: filename=%s doc_id=%s", filename, doc_id)
-
-        documents_store[doc_id].update(
-            {
-                "status": DocumentStatus.READY,
-                "page_count": page_count,
-                "chunk_count": len(chunks),
-            }
-        )
-        save_documents_store()
-        logger.info("Processing completed: filename=%s doc_id=%s", filename, doc_id)
-    except Exception as e:
-        logger.exception(
-            "Processing failed: filename=%s doc_id=%s error=%s",
-            filename,
-            doc_id,
-            e,
-        )
-        documents_store[doc_id].update(
-            {
-                "status": DocumentStatus.ERROR,
-                "error_message": str(e),
-            }
-        )
-        save_documents_store()
+@app.get("/api/jobs/{job_id}", response_model=JobResponse)
+async def get_job(job_id: str, db: Session = Depends(get_db)):
+    job = db.get(JobRecord, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job_to_response(job)
 
 
 @app.get("/api/documents")
-async def list_documents():
-    logger.info("Listing documents: total=%s", len(documents_store))
-    docs = sorted(
-        [DocumentResponse(**doc) for doc in documents_store.values()],
-        key=lambda x: x.created_at,
-        reverse=True,
-    )
+async def list_documents(db: Session = Depends(get_db)):
+    documents = db.query(DocumentRecord).order_by(desc(DocumentRecord.created_at)).all()
+    latest_jobs = {}
+    for job in (
+        db.query(JobRecord)
+        .filter(JobRecord.document_id.isnot(None))
+        .order_by(desc(JobRecord.created_at))
+        .all()
+    ):
+        if job.document_id and job.document_id not in latest_jobs:
+            latest_jobs[job.document_id] = job.id
+    docs = [
+        document_to_response(document, current_job_id=latest_jobs.get(document.id))
+        for document in documents
+    ]
     return {"documents": docs, "total": len(docs)}
 
 
-@app.get("/api/documents/{doc_id}")
-async def get_document(doc_id: str):
-    if doc_id not in documents_store:
-        logger.warning("Document lookup failed: doc_id=%s", doc_id)
+@app.get("/api/documents/{doc_id}", response_model=DocumentResponse)
+async def get_document(doc_id: str, db: Session = Depends(get_db)):
+    document = db.get(DocumentRecord, doc_id)
+    if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-
-    logger.info(
-        "Document lookup: doc_id=%s status=%s",
-        doc_id,
-        documents_store[doc_id].get("status"),
-    )
-    return DocumentResponse(**documents_store[doc_id])
+    return document_to_response(document)
 
 
 @app.delete("/api/documents/{doc_id}")
-async def delete_document(doc_id: str):
-    if doc_id not in documents_store:
-        logger.warning("Delete failed; document not found: doc_id=%s", doc_id)
+async def delete_document(doc_id: str, db: Session = Depends(get_db)):
+    document = db.get(DocumentRecord, doc_id)
+    if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    doc = documents_store[doc_id]
-    if os.path.exists(doc.get("file_path", "")):
-        os.remove(doc["file_path"])
-
+    if os.path.exists(document.file_path):
+        os.remove(document.file_path)
     delete_vectorstore(doc_id)
-    del documents_store[doc_id]
-    save_documents_store()
-    logger.info("Document deleted: doc_id=%s filename=%s", doc_id, doc.get("filename"))
-
+    db.delete(document)
+    db.commit()
+    logger.info("Document deleted: doc_id=%s filename=%s", doc_id, document.filename)
     return {"message": "Document deleted"}
 
 
 @app.delete("/api/documents")
-async def delete_all_documents():
-    global documents_store
-
-    for doc_id, doc in list(documents_store.items()):
-        if os.path.exists(doc.get("file_path", "")):
+async def delete_all_documents(db: Session = Depends(get_db)):
+    documents = db.query(DocumentRecord).all()
+    for document in documents:
+        if os.path.exists(document.file_path):
             try:
-                os.remove(doc["file_path"])
+                os.remove(document.file_path)
             except Exception:
-                logger.exception("Failed to remove upload during delete-all: doc_id=%s", doc_id)
+                logger.exception("Failed to remove upload during delete-all: doc_id=%s", document.id)
         try:
-            delete_vectorstore(doc_id)
+            delete_vectorstore(document.id)
         except Exception:
-            logger.exception("Failed to remove vectorstore during delete-all: doc_id=%s", doc_id)
+            logger.exception("Failed to remove vectorstore during delete-all: doc_id=%s", document.id)
+        db.delete(document)
 
-    documents_store = {}
-    save_documents_store()
+    db.commit()
     logger.info("All documents deleted")
-
     return {"message": "All documents deleted"}
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, db: Session = Depends(get_db)):
     if not request.query.strip():
-        logger.warning("Rejected empty chat query")
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     if not request.document_ids:
-        ready_docs = [
-            doc_id
-            for doc_id, doc in documents_store.items()
-            if doc["status"] == DocumentStatus.READY
+        request.document_ids = [
+            document.id
+            for document in db.query(DocumentRecord)
+            .filter(DocumentRecord.status == DocumentStatus.READY.value)
+            .all()
         ]
-        if not ready_docs:
-            logger.warning("Rejected chat query because no ready documents are available")
+        if not request.document_ids:
             raise HTTPException(
                 status_code=400,
                 detail="No documents available. Upload and process documents first.",
             )
-        request.document_ids = ready_docs
+
+    documents = (
+        db.query(DocumentRecord)
+        .filter(DocumentRecord.id.in_(request.document_ids))
+        .all()
+    )
+    documents_by_id = {document.id: document for document in documents}
 
     for doc_id in request.document_ids:
-        if doc_id not in documents_store:
-            logger.warning("Rejected chat query; document not found: doc_id=%s", doc_id)
+        document = documents_by_id.get(doc_id)
+        if not document:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
-        if documents_store[doc_id]["status"] != DocumentStatus.READY:
-            logger.warning(
-                "Rejected chat query; document not ready: doc_id=%s status=%s",
-                doc_id,
-                documents_store[doc_id]["status"],
-            )
+        if document.status != DocumentStatus.READY.value:
             raise HTTPException(status_code=400, detail=f"Document {doc_id} not ready")
 
-    logger.info("Chat request: query=%r document_ids=%s", request.query, request.document_ids)
-
-    results = search_documents(request.document_ids, request.query)
-
-    if not results:
-        logger.info("Chat request had no relevant search results")
-        return ChatResponse(answer="No relevant information found.", sources=[], model="gpt-3.5-turbo")
-
-    context = [doc.page_content for doc, _ in results]
     session_id = "_".join(sorted(request.document_ids))
     history = chat_histories.get(session_id, [])
 
-    answer = generate_answer(request.query, context, history)
-    logger.info("Chat response generated: sources=%s", len(results))
+    result = run_study_agent(
+        db=db,
+        query=request.query,
+        document_ids=request.document_ids,
+        documents_by_id=documents_by_id,
+        history=history,
+    )
+    answer = result["answer"]
+    sources = result.get("sources", [])
+    sources = sources[:5]
+    logger.info(
+        "Chat response generated: intent=%s tools=%s sources=%s",
+        result.get("intent"),
+        result.get("used_tools", []),
+        len(sources),
+    )
 
     chat_histories[session_id] = history + [(request.query, answer)]
-
-    sources = []
-    for doc, _ in results:
-        doc_id = doc.metadata.get("source_document_id", "")
-        sources.append(
-            SourceDocument(
-                document_id=doc_id,
-                filename=documents_store.get(doc_id, {}).get("filename", "Unknown"),
-                chunk_text=doc.page_content[:500] + "..."
-                if len(doc.page_content) > 500
-                else doc.page_content,
-                page=doc.metadata.get("page"),
-            )
-        )
-
-    return ChatResponse(answer=answer, sources=sources, model="gpt-3.5-turbo")
+    return ChatResponse(
+        answer=answer,
+        sources=sources,
+        model=OPENAI_MODEL,
+        intent=result.get("intent"),
+        used_tools=result.get("used_tools", []),
+    )

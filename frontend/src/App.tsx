@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileText, MessageSquare, Upload, X, Send, Bot, User, Loader2, BookOpen } from 'lucide-react';
-import { documentApi, chatApi, healthApi } from './api';
-import type { Document, Message, HealthResponse } from './types';
+import { documentApi, chatApi, healthApi, jobApi } from './api';
+import type { Document, Message, HealthResponse, Job } from './types';
 
 function App() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -11,6 +11,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [chatLoading, setChatLoading] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [jobs, setJobs] = useState<Record<string, Job>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,12 +29,39 @@ function App() {
       if (healthData.status === 'healthy') {
         const docsData = await documentApi.list();
         setDocuments(docsData.documents);
+        refreshJobs(docsData.documents);
       }
     } catch {}
     setLoading(false);
   };
 
   const [polling, setPolling] = useState(false);
+
+  const refreshJobs = async (docs: Document[]) => {
+    const docsWithJobs = docs.filter(doc => doc.current_job_id);
+    if (!docsWithJobs.length) return;
+
+    const jobEntries = await Promise.all(
+      docsWithJobs.map(async doc => {
+        try {
+          const job = await jobApi.get(doc.current_job_id!);
+          return [doc.id, job] as const;
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    setJobs(prev => {
+      const next = { ...prev };
+      jobEntries.forEach(entry => {
+        if (entry) {
+          next[entry[0]] = entry[1];
+        }
+      });
+      return next;
+    });
+  };
 
   const uploadFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -43,6 +71,7 @@ function App() {
       const fileArray = Array.from(files);
       const docs = await documentApi.upload(fileArray);
       setDocuments(prev => [...docs, ...prev]);
+      refreshJobs(docs);
     } catch (err) {
       console.error(err);
     }
@@ -55,6 +84,7 @@ function App() {
       try {
         const data = await documentApi.list();
         setDocuments(data.documents);
+        await refreshJobs(data.documents);
         if (!data.documents.some((d: Document) => d.status === 'processing' || d.status === 'pending')) {
           setPolling(false);
         }
@@ -174,6 +204,11 @@ function App() {
                       <p className="text-xs text-gray-500">
                         {doc.status === 'ready' ? `${doc.page_count} pages` : doc.status}
                       </p>
+                      {jobs[doc.id] && doc.status !== 'ready' ? (
+                        <p className="text-xs text-blue-600">
+                          {jobs[doc.id].status} {jobs[doc.id].progress}%
+                        </p>
+                      ) : null}
                       {doc.status === 'error' && doc.error_message ? (
                         <p className="text-xs text-red-600 max-w-[180px] truncate" title={doc.error_message}>
                           {doc.error_message}
@@ -221,17 +256,19 @@ function App() {
                   ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
                   <p className="whitespace-pre-wrap">{msg.content}</p>
                   {msg.sources?.length ? (
-                    <div className="mt-2 pt-2 border-t border-gray-300">
-                      <p className="text-xs flex items-center gap-1 mb-1">
-                        <BookOpen className="w-3 h-3" /> Sources:
-                      </p>
-                      {msg.sources.map((s, i) => (
-                        <div key={i} className="text-xs bg-white rounded p-2 mb-1">
-                          <p className="font-medium">{s.filename}</p>
-                          <p className="line-clamp-2">{s.chunk_text}</p>
-                        </div>
-                      ))}
-                    </div>
+                    <details className="mt-2 pt-2 border-t border-gray-300">
+                      <summary className="text-xs flex items-center gap-1 mb-1 cursor-pointer">
+                        <BookOpen className="w-3 h-3" /> Sources ({msg.sources.length})
+                      </summary>
+                      <div className="space-y-1">
+                        {msg.sources.slice(0, 5).map((s, i) => (
+                          <div key={i} className="text-xs bg-white rounded p-2">
+                            <p className="font-medium">{s.filename}{s.page ? ` - page ${s.page}` : ''}</p>
+                            <p className="line-clamp-3">{s.chunk_text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
                   ) : null}
                 </div>
               </div>

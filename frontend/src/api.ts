@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Document, ChatResponse, HealthResponse } from './types';
+import type { Document, ChatResponse, HealthResponse, Job } from './types';
 
 const api = axios.create({ baseURL: '/api' });
 
@@ -27,6 +27,13 @@ export const documentApi = {
 export const chatApi = {
   send: async (query: string, documentIds?: string[]): Promise<ChatResponse> => {
     const { data } = await api.post<ChatResponse>('/chat', { query, document_ids: documentIds });
+    return data;
+  },
+};
+
+export const jobApi = {
+  get: async (id: string): Promise<Job> => {
+    const { data } = await api.get<Job>(`/jobs/${id}`);
     return data;
   },
 };

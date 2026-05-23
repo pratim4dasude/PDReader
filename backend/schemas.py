@@ -19,6 +19,7 @@ class DocumentResponse(BaseModel):
     page_count: Optional[int] = None
     chunk_count: Optional[int] = None
     error_message: Optional[str] = None
+    current_job_id: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -37,9 +38,23 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[SourceDocument]
     model: str
+    intent: Optional[str] = None
+    used_tools: List[str] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):
     status: str
     version: str
     openai_configured: bool
+
+
+class JobResponse(BaseModel):
+    id: str
+    document_id: Optional[str] = None
+    job_type: str
+    status: str
+    progress: int
+    error_message: Optional[str] = None
+    rq_job_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
